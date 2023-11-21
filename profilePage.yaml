@@ -79,6 +79,21 @@ Resources:
   ArtifactStoreBucket:
     Type: AWS::S3::Bucket
 
+  # Wekbook for Github to trigger the Pipeline
+  PipelineWebhook:
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: !Ref GitHubOAuthToken # Token stored on AWS Secrets Manager
+      Filters:
+        - JsonPath: "$.ref"
+          MatchEquals: "refs/heads/{master}"
+      TargetPipeline: !Ref MyPipeline
+      TargetPipelineVersion: !GetAtt MyPipeline.Version
+      TargetAction: SourceAction # Replace with the name of your source action
+      RegisterWithThirdParty: true
+
   # Pipeline definition
   MyPipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -88,6 +103,34 @@ Resources:
         Type: S3
         Location: !Ref ArtifactStoreBucket
       Stages:
-        -  # Source stage definition
-        -  # Build stage definition
+        - Name: Source
+          Actions:
+            - Name: GitHub_Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: [FelipeNogueraP]
+                Repo: [notus-pro-react.git]
+                Branch: master
+                OAuthToken: !Ref GitHubOAuthToken
+              OutputArtifacts:
+                - Name: SourceOutput # This will be used as input in the next stage
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref MyCodeBuildProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput # This will be used as input in the next stage
+              RunOrder: 1
         -  # Deploy stage definition
