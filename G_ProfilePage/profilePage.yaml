@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: A template for setting up a full CI/CD pipeline and serverless infrastructure for a static website.
 
+Parameters:
+  GitHubOAuthToken:
+    Description: "OAuth token for GitHub to authenticate"
+    Type: String
+    NoEcho: true
+
 Resources:
   # Pipeline Roles
   CodePipelineRole:
@@ -78,6 +84,12 @@ Resources:
   # Where to store the build output
   ArtifactStoreBucket:
     Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      AccessControl: Private
+      BucketName: G-Profile-Page-ArtifactStoreBucket
 
   # Wekbook for Github to trigger the Pipeline
   PipelineWebhook:
@@ -91,7 +103,7 @@ Resources:
           MatchEquals: "refs/heads/{master}"
       TargetPipeline: !Ref MyPipeline
       TargetPipelineVersion: !GetAtt MyPipeline.Version
-      TargetAction: SourceAction # Replace with the name of your source action
+      TargetAction: SourceAction
       RegisterWithThirdParty: true
 
   # Pipeline definition
@@ -133,4 +145,56 @@ Resources:
               OutputArtifacts:
                 - Name: BuildOutput # This will be used as input in the next stage
               RunOrder: 1
-        -  # Deploy stage definition
+        - Name: Deploy
+          Actions: 
+            - Name: DeployAction
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: 1
+              Configuration: 
+                BucketName: !ref ArtifactStoreBucket
+                Extract: true
+                ObjectKey: build/ #Destination folder from the buildspec.yaml "artifacts/baseDirectory"
+              InputArtifacts: 
+                - Name: BuildOutput
+              RunOrder: 1
+
+
+
+
+  MyCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - www.soportejuridico.co
+        DefaultRootObject: index.html
+        ViewerCertificate:
+          AcmCertificateArn: arn:aws:acm:us-west-2:454748197495:certificate/eb366362-e5f3-4656-b76f-ddc59fc4f655
+          SslSupportMethod: sni-only
+        Origins:
+          - DomainName: !GetAtt ArtifactStoreBucket.WebsiteURL
+            Id: S3Origin
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        Enabled: true
+
+
+
+
+# Keep in mind:
+
+# The S3 bucket name must be globally unique.
+# The SSL certificate for CloudFront should be in the us-east-1 region, even if your other resources are in different regions.
+# Ensure the domain name is configured with your DNS provider to point to the CloudFront distribution.
+# The S3 bucket policy and CloudFront OAI (Origin Access Identity) might need to be configured for enhanced security and to ensure that the S3 bucket is only accessible via the CloudFront distribution.
+# Update your buildspec file to include commands to copy the build artifacts to the S3 bucket if required.
