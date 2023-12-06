@@ -1,0 +1,10 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "g-stack"
+resolve_s3 = true
+s3_prefix = "g-stack"
+region = "us-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "GitHubOAuthTokenARN=\"arn:aws:secretsmanager:us-west-2:454748197495:secret:TokenForGithubOauth-ZAkPnk\""
+image_repositories = []
