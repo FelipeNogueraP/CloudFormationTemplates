@@ -2,10 +2,15 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: A template for setting up a full CI/CD pipeline and serverless infrastructure for a static website.
 
 Parameters:
-  GitHubOAuthToken:
-    Description: "OAuth token for GitHub to authenticate"
+  # ArtifactStoreBucketName:
+  #   Type: String
+  #   Description: Enter the name of the S3 bucket
+  # DeploymentBucketName:
+  #   Type: String
+  #   Description: Enter the name of the S3 bucket
+  GitHubOAuthTokenARN:
     Type: String
-    NoEcho: true
+    Default: "arn:aws:secretsmanager:us-west-2:454748197495:secret:TokenForGithubOauth-ZAkPnk"
 
 Resources:
   # Pipeline Roles
@@ -26,12 +31,15 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - "s3:*"
                   - "codebuild:StartBuild"
                   - "codebuild:BatchGetBuilds"
-                  - "lambda:*"
-                  - "cloudwatch:*"
-                  - "logs:*"
+                  - "codebuild:CreateProject"
+                  - "codebuild:DeleteProject"
+                  - "lambda:InvokeFunction"
+                  - "cloudwatch:PutMetricData"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "secretsmanager:GetSecretValue"
                 Resource: "*"
 
   CodeBuildRole:
@@ -51,16 +59,42 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - "s3:*"
-                  - "logs:*"
-                  - "cloudwatch:*"
-                  - "ecr:GetAuthorizationToken"
-                  - "ecr:BatchCheckLayerAvailability"
-                  - "ecr:InitiateLayerUpload"
-                  - "ecr:UploadLayerPart"
-                  - "ecr:CompleteLayerUpload"
-                  - "ecr:PutImage"
+                  - "s3:GetObject"
+                  - "s3:PutObject"
+                  - "s3:GetObjectVersion"
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "secretsmanager:GetSecretValue"
                 Resource: "*"
+  # Bucket Policies
+  ArtifactStoreBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactStoreBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AllowCloudFrontAccess"
+            Effect: "Allow"
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${ArtifactStoreBucket}/*"
+
+  DeploymentBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DeploymentBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AllowCloudFrontAccess"
+            Effect: "Allow"
+            Principal:
+              AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOAI}"
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${DeploymentBucket}/*"
   # Build Project
   MyCodeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -73,23 +107,33 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/amazonlinux2-aarch64-standard:3.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
       Source:
-        Type: GITHUB
-        Location: "https://github.com/FelipeNogueraP/notus-pro-react.git"
-        SourceVersion: master
-        GitCloneDepth: 1
-        BuildSpec: buildspec.yml
+        Type: CODEPIPELINE
+
+      # Source:
+      #   Type: GITHUB
+      #   Location: "https://github.com/FelipeNogueraP/notus-pro-react.git"
+      #   GitCloneDepth: 1
+      #   BuildSpec: buildspec.yml
 
   # Where to store the build output
   ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      # BucketName: !Ref ArtifactStoreBucketName
+      BucketName: mybuckettostoreartifacts1234
+  # Where to store the Deployment artifacts
+  DeploymentBucket:
     Type: AWS::S3::Bucket
     Properties:
       WebsiteConfiguration:
         IndexDocument: index.html
         ErrorDocument: error.html
       AccessControl: Private
-      BucketName: G-Profile-Page-ArtifactStoreBucket
+      # BucketName: !Ref DeploymentBucketName
+      BucketName: mybuckettostoredeployment1234957
 
   # Wekbook for Github to trigger the Pipeline
   PipelineWebhook:
@@ -97,7 +141,8 @@ Resources:
     Properties:
       Authentication: GITHUB_HMAC
       AuthenticationConfiguration:
-        SecretToken: !Ref GitHubOAuthToken # Token stored on AWS Secrets Manager
+        SecretToken: !Sub "{{resolve:secretsmanager:${GitHubOAuthTokenARN}:SecretString}}"
+        # Token stored on AWS Secrets Manager
       Filters:
         - JsonPath: "$.ref"
           MatchEquals: "refs/heads/{master}"
@@ -117,17 +162,17 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            - Name: GitHub_Source
+            - Name: SourceAction
               ActionTypeId:
                 Category: Source
                 Owner: ThirdParty
                 Provider: GitHub
                 Version: 1
               Configuration:
-                Owner: [FelipeNogueraP]
-                Repo: [notus-pro-react.git]
+                Owner: FelipeNogueraP
+                Repo: notus-pro-react.git
                 Branch: master
-                OAuthToken: !Ref GitHubOAuthToken
+                OAuthToken: !Ref GitHubOAuthTokenARN
               OutputArtifacts:
                 - Name: SourceOutput # This will be used as input in the next stage
         - Name: Build
@@ -146,39 +191,43 @@ Resources:
                 - Name: BuildOutput # This will be used as input in the next stage
               RunOrder: 1
         - Name: Deploy
-          Actions: 
+          Actions:
             - Name: DeployAction
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
                 Provider: S3
                 Version: 1
-              Configuration: 
-                BucketName: !ref ArtifactStoreBucket
+              Configuration:
+                BucketName: !Ref DeploymentBucket
                 Extract: true
                 ObjectKey: build/ #Destination folder from the buildspec.yaml "artifacts/baseDirectory"
-              InputArtifacts: 
+              InputArtifacts:
                 - Name: BuildOutput
               RunOrder: 1
 
-
-
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: "OAI for accessing S3 bucket"
 
   MyCloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Aliases:
-          - www.soportejuridico.co
+        # Aliases:
+        #   - www.soportejuridico.co
+        # This is pointing to my current cloudformation distribution and result in error
         DefaultRootObject: index.html
         ViewerCertificate:
-          AcmCertificateArn: arn:aws:acm:us-west-2:454748197495:certificate/eb366362-e5f3-4656-b76f-ddc59fc4f655
+          AcmCertificateArn: arn:aws:acm:us-east-1:454748197495:certificate/72adf801-3231-488c-bafe-1dd20ceea6ee
           SslSupportMethod: sni-only
         Origins:
-          - DomainName: !GetAtt ArtifactStoreBucket.WebsiteURL
+          - DomainName: !GetAtt DeploymentBucket.DomainName
             Id: S3Origin
-            CustomOriginConfig:
-              OriginProtocolPolicy: http-only
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOAI}"
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
@@ -187,14 +236,3 @@ Resources:
             Cookies:
               Forward: none
         Enabled: true
-
-
-
-
-# Keep in mind:
-
-# The S3 bucket name must be globally unique.
-# The SSL certificate for CloudFront should be in the us-east-1 region, even if your other resources are in different regions.
-# Ensure the domain name is configured with your DNS provider to point to the CloudFront distribution.
-# The S3 bucket policy and CloudFront OAI (Origin Access Identity) might need to be configured for enhanced security and to ensure that the S3 bucket is only accessible via the CloudFront distribution.
-# Update your buildspec file to include commands to copy the build artifacts to the S3 bucket if required.
