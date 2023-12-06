@@ -244,7 +244,7 @@ Resources:
     Properties:
       Handler: emailSender.lambda_handler
       Runtime: python3.10
-      CodeUri: G_ProfilePage/
+      CodeUri: .
       Description: "A Lambda function that sends emails via SES."
       MemorySize: 128
       Timeout: 10
