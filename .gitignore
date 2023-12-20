@@ -401,3 +401,8 @@ virtualEnv/*
 .vscode
 .vscode/*
 .aws-sam/*
+G_ProfilePage/.DS_Store/*
+G_ProfilePage/.DS_Store
+DS_Store/
+DS_Store
+G_ProfilePage/.aws-sam/*
