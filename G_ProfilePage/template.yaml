@@ -139,21 +139,22 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Resource:
-                  - !GetAtt BuildLogGroup.Arn
                 Action:
                   - "logs:CreateLogGroup"
                   - "logs:CreateLogStream"
                   - "logs:PutLogEvents"
+                Resource: "arn:aws:logs:us-west-2:454748197495:log-group:/aws/codebuild/MyCodeBuildProject:*"
               - Effect: Allow
-                Resource:
-                  - "arn:aws:s3:::codepipeline-us-west-2-*"
                 Action:
                   - "s3:PutObject"
                   - "s3:GetObject"
                   - "s3:GetObjectVersion"
                   - "s3:GetBucketAcl"
                   - "s3:GetBucketLocation"
+                  - "s3:ListBucket"
+                Resource:
+                  - "arn:aws:s3:::mybuckettostoreartifacts1234"
+                  - "arn:aws:s3:::mybuckettostoreartifacts1234/*"
               - Effect: Allow
                 Action:
                   - "codebuild:CreateReportGroup"
@@ -211,7 +212,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
       Source:
         Type: CODEPIPELINE
 
